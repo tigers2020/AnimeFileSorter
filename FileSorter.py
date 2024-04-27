@@ -100,13 +100,9 @@ class FileOrganizer:
         return None
 
     def move_file_to_organized_dir(self, file_path, resolution, title, search_results):
-        """Moves the file to an organized directory structure based on metadata."""
-        # Extracting the year and quarter from search results.
         year, quarter = self.tmdb_handler.get_year_quarter(search_results) if search_results else (None, None)
-        # Constructing directory names based on the year and quarter.
         quarter_folder = quarter or "Unknown Quarter"
         year_folder = str(year) if year else "Unknown Year"
-        # Building the full path to the organized directory.
         organized_dir = os.path.join(self.dirs["organized"], year_folder, quarter_folder, title, resolution)
         os.makedirs(organized_dir, exist_ok=True)
 
@@ -121,11 +117,9 @@ class FileOrganizer:
             ".rar": self.dirs["subtitles"]
         }
         target_dir = file_types.get(extension, organized_dir)
-        print(target_dir)
-
         target_file_path = os.path.join(target_dir, os.path.basename(file_path))
-        print(target_file_path)
-        # Attempting to move the file to the target directory or handling duplicates.
+
+        # Move or duplicate file handling
         try:
             if os.path.exists(target_file_path):
                 shutil.move(file_path, os.path.join(self.dirs["duplicated"], os.path.basename(file_path)))
@@ -133,9 +127,20 @@ class FileOrganizer:
             else:
                 shutil.move(file_path, target_file_path)
                 logger.info(f"Moved {file_path} to {target_file_path}")
+                # Call to remove empty directories after moving a file
+                self.remove_empty_directories(os.path.dirname(file_path))
         except Exception as e:
-            # Logging any errors that occur during file movement.
             logger.error(f"Error moving {file_path} to {target_file_path}: {e}")
+    
+    def remove_empty_directories(self, root):
+        """Recursively remove empty directories from a specified root directory."""
+        for dirpath, dirnames, filenames in os.walk(root, topdown=False):
+            # Check each directory from bottom to top, removing empty directories
+            for dirname in dirnames:
+                full_path = os.path.join(dirpath, dirname)
+                if not os.listdir(full_path):
+                    os.rmdir(full_path)
+                    logger.info(f"Removed empty directory: {full_path}")
 
 # Main block to run the file organizer using a specific configuration file.
 if __name__ == "__main__":
