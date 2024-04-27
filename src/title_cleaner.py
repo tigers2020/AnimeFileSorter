@@ -20,28 +20,24 @@ class TitleCleaner:
         """
                 # Comprehensive regex patterns covering all specified cases
         self.patterns_to_remove = [
-            regex.compile(r'\s*-\s*NanDesuKa\s*|\s*-\s*KyangBang\s*', regex.IGNORECASE),  # Specific unwanted tag
-            regex.compile(r'2AUDIO', regex.IGNORECASE),
-            re.compile(r'\([^()]*\)|\{[^{}]*\}|\[[^\[\]]*\]|<[^<>]*>|『[^『』]*』|「[^「」]*」'),
-            regex.compile(r'S\d+E\d+.*', regex.IGNORECASE),  # Season and episode info like "S01E02"
-            regex.compile(r'S\d+', regex.IGNORECASE),  # Season info like "S01"
-            regex.compile(r'Part\d+', regex.IGNORECASE), # Season info like "Part2"
-            regex.compile(r'EP\d+.*', regex.IGNORECASE),  # Episode info like "EP01"
-            regex.compile(r'\d{1,2}x\d+.*', regex.IGNORECASE),  # Episode info like "1x01"
-            regex.compile(r'\d+기', regex.IGNORECASE),  # Episode info like "1기"
-            regex.compile(r'Season \d+.*', regex.IGNORECASE),  # Episode info like "1기"
-            regex.compile(r'\d+화.*', regex.IGNORECASE),  # Episode info like "1기"
-            regex.compile(r'- \d+.*', regex.IGNORECASE),  # Episode info like " - 01"
-            regex.compile(r'- \d{1,2}v\d+', regex.IGNORECASE),  # Episode info like " - 01v2"
-            regex.compile(r'- \d+.\d+', regex.IGNORECASE),  # Episode info like " - 01.5"
-            regex.compile(r'\b\d{3,4}p\b', regex.IGNORECASE),  # Resolution like "1080p"
-            regex.compile(r'\b\d{3,4}[xX]\d{3,4}\b', regex.IGNORECASE), # Resolution like "1920x1080"
-            regex.compile(r'\b(?:[Hx]\s*\.?\s*264)\b|\bHEVC\b|\bAVC\b', regex.IGNORECASE),  # Video codecs
-            regex.compile(r'\bRAW.*\b|\bEND.*\b|\bFLAC.*\b|\bWEB.*\b|\bBluRay.*\b|\bBDrip.*\b|\bBDRip.*\b|\bDVD.*\b|\bDVDrip.*\b|\bHDRip.*\b', regex.IGNORECASE),  # Source types
-            regex.compile(r'\bAAC.*\b|\bChap.*\b|\bsp\b', regex.IGNORECASE),
-            regex.compile(r'\bXviD.*\b|\bAC3.*\b|\bNCOP.*\b|\bAC3_Simu.*\b|\bK2r.*\b|\b2ST-EiN.*\b', regex.IGNORECASE),
-            regex.compile(r'\bREALOVE：REALIFE\b|\bOP\b|\bext\b', regex.IGNORECASE),
+            # Combine episode and season patterns into one pattern using non-capturing groups
+            regex.compile(r'(?:S\d+E\d+|S\d+|EP\d+|\d{1,2}x\d+|Part\d+|Season \d+|\d+기|\d+화).*', regex.IGNORECASE),
+            # Combine resolutions and video codecs
+            regex.compile(r'\b(?:\d{3,4}p|\d{3,4}[xX]\d{3,4}|[Hx]\s*\.?\s*264|HEVC|AVC)\b', regex.IGNORECASE),
+            # Combine all source types into one pattern
+            regex.compile(r'\b(?:RAW|END|FLAC|WEB|BluRay|BDrip|BDRip|DVD|DVDrip|HDRip).*\b', regex.IGNORECASE),
+            # Combine miscellaneous and less common tags
+            regex.compile(r'\b(?:AAC|Chap|sp|XviD|AC3|NCOP|AC3_Simu|K2r|2ST-EiN|REALOVE：REALIFE|OP|ext)\b', regex.IGNORECASE),
+            # Specific unwanted tags and numeric patterns
+            regex.compile(r'\s*-\s*(?:NanDesuKa|KyangBang)\s*|2AUDIO', regex.IGNORECASE),
+            # Regular expressions for brackets and punctuation marks
+            regex.compile(r'\([^()]*\)|\{[^{}]*\}|\[[^\[\]]*\]|<[^<>]*>|『[^『』]*』|「[^「」]*」'),
+            # Regex to remove trailing numbers from 00 to 99 at the end of a title
+            regex.compile(r'\b\d{2}\b$', regex.IGNORECASE),
+            # Episode info with specific formats
+            regex.compile(r'- \d{1,2}v\d+|- \d+.\d+|- \d+.*', regex.IGNORECASE)
         ]
+
 
         self.anime_title_with_number_pattern = re.compile(r'(?P<anime_title>[a-zA-Z ]+) - \d+')
 
