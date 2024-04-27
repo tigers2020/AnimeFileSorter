@@ -6,6 +6,7 @@ others/
 duplicated/
 organized/
 logs/
+Animations/
 
 # Ignore all .log files
 *.log

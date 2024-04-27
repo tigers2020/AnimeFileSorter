@@ -38,27 +38,27 @@ class FileOrganizer:
             os.makedirs(path, exist_ok=True)
 
     def organize_files(self, directory):
-        """Handles the organization of files within a specified directory."""
-        # Constructing the full path to the directory.
+        """Recursively handles the organization of files and directories within a specified directory."""
         full_path = os.path.join(self.base_dir, directory)
-        # Handling potential errors when the directory does not exist.
         try:
-            files = os.listdir(full_path)
+            items = os.listdir(full_path)
         except FileNotFoundError:
             logger.error(f"Directory not found: {full_path}")
             return
-        # Logging the start of the organization process.
-        logger.info("Starting the file organization process.")
-        # Iterating over each file in the directory and processing them.
-        for filename in tqdm(files, desc="Organizing files", unit="file"):
-            self.process_file(full_path, filename)
-        # Logging the successful completion of the organization process.
-        logger.info("File organization process completed successfully.")
+        logger.info(f"Starting the file organization process in {full_path}.")
+        for item in tqdm(items, desc="Organizing files", unit="item"):
+            item_path = os.path.join(full_path, item)
+            if os.path.isdir(item_path):
+                self.organize_files(item_path)  # Recursively organize directories
+            else:
+                self.process_file(full_path, item)
+        logger.info(f"File organization process completed successfully for {full_path}.")
 
     def process_file(self, directory, filename):
         """Processes each file individually, determining its fate based on its contents and metadata."""
         # Constructing the full path to the file.
         file_path = os.path.join(directory, filename)
+        print(file_path)
         # Cleaning and extracting relevant information from the filename.
         clean_title = self.title_cleaner.clean_title(filename)
         resolution = self.title_cleaner.extract_resolution(filename)
