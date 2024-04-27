@@ -110,13 +110,21 @@ class FileOrganizer:
         organized_dir = os.path.join(self.dirs["organized"], year_folder, quarter_folder, title, resolution)
         os.makedirs(organized_dir, exist_ok=True)
 
-        # Determining the file extension and setting the appropriate target directory.
+        # File type handling
         extension = os.path.splitext(file_path)[1].lower()
-        file_types = {".doc": "documents", ".docx": "documents", ".txt": "documents",
-                      ".pdf": "documents", ".zip": "subtitles", ".rar": "subtitles"}
-        target_dir = self.dirs.get(file_types.get(extension, "others"), organized_dir)
-        target_file_path = os.path.join(target_dir, os.path.basename(file_path))
+        file_types = {
+            ".doc": self.dirs["documents"],
+            ".docx": self.dirs["documents"],
+            ".txt": self.dirs["documents"],
+            ".pdf": self.dirs["documents"],
+            ".zip": self.dirs["subtitles"],
+            ".rar": self.dirs["subtitles"]
+        }
+        target_dir = file_types.get(extension, organized_dir)
+        print(target_dir)
 
+        target_file_path = os.path.join(target_dir, os.path.basename(file_path))
+        print(target_file_path)
         # Attempting to move the file to the target directory or handling duplicates.
         try:
             if os.path.exists(target_file_path):
