@@ -30,7 +30,7 @@ class FileOrganizer:
         """Creates directories listed in the dirs dictionary if they don't exist."""
         # Mapping directory names to their full paths.
         self.dirs = {key: os.path.join(self.base_dir, name) for key, name in 
-                     [("subtitles", "subtitles"), ("documents", "documents"),
+                     [("animations","animations"),("subtitles", "subtitles"), ("documents", "documents"),
                       ("others", "others"), ("duplicated", "duplicated"), 
                       ("organized", "organized")]}
         # Creating directories that don't exist using os.makedirs with exist_ok=True.
