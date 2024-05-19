@@ -1,8 +1,10 @@
-import requests
-from log import logger  # Assuming logger is configured appropriately in the log.py module
-import datetime
+import math
 
+import requests
 from dateutil import parser
+
+from .log import logger  # Assuming logger is configured appropriately in the log.py
+
 
 class TMDbHandler:
     def __init__(self, api_key, result_language='ko'):
@@ -13,69 +15,67 @@ class TMDbHandler:
     def _make_request(self, endpoint, params):
         """ Helper method to make API requests and handle responses. """
         url = f"{self.base_url}{endpoint}"
+        response = None
+
         try:
             response = requests.get(url, params=params)
-            response.raise_for_status()
-            return response.json()
+            if response is not None:
+                response.raise_for_status()
         except requests.RequestException as e:
             logger.error(f"Request failed: {e}")
-            return None
+        # Always return, even when requests throws an exception
+        return response.json() if response else None
 
     def search(self, content_type, query, language=None):
         """ General search method for both movies and TV shows. """
-        if language is None:
-            language = self.result_language
         endpoint = f"search/{content_type}"
-        params = {'api_key': self.api_key, 'language': language, 'query': query}
-        
-        logger.info(f"Searching for {content_type}: '{query}' with language setting: '{language}'")
+        params = {'api_key': self.api_key, 'language': language or self.result_language, 'query': query}
         response = self._make_request(endpoint, params)
-        if response and 'results' in response and response['results']:
+        if self.has_search_results(response):
             logger.info(f"Search successful for {content_type} with {query}")
         else:
             logger.warning(f"No results found for {content_type} with {query}")
         return response
-    def search_media(self, title):
-        for content_type in ['tv', 'movie']:
+
+    def has_search_results(self, search_response):
+        """ Check if a given search response has results or not """
+        return bool(search_response.get('results'))
+
+    def search_media(self, title, content_types=['tv', 'movie']):
+        for content_type in content_types:
             search_results = self.search(content_type, title)
-            if search_results and search_results['results']:
+            if self.has_search_results(search_results):
                 return search_results
-        # If no results found for either type, raise an exception
         logger.error(f"No results found for {title}")
         return None
-        #raise Exception(f"No results found for title: {title}")
 
-    def get_titles(self, search_results):
-        """Extract movie or TV show titles from search results."""
-        if not search_results or 'results' not in search_results or not search_results['results']:
-            return None  # Return None if there are no results to process
-        
-        titles = [result['title'] if 'title' in result else result['name'] for result in search_results['results']]
+    def first_title_from_search_results(self, search_results):
+        """Extract first movie or TV show title from search results."""
+        if not self.has_search_results(search_results):
+            return None
+        titles = [result.get('title') or result.get('name') for result in search_results['results'] if
+                  result.get('title') or result.get('name')]
         logger.info(f"Extracted {len(titles)} titles from search results: {titles}")
         return titles[0] if titles else None
-
-    # Existing methods like get_movie(), get_year_quarter(), etc., would remain largely unchanged.
-
 
     def get_year_quarter(self, search_results):
         """Extract the year and quarter from search results that might include multiple entries."""
         date_str = None
-        if search_results is not None:
-            # Handling multiple results typically from a search query
-            if 'results' in search_results and search_results['results']:
-                for result in search_results['results']:
-                    if 'release_date' in result and result['release_date']:
-                        date_str = result['release_date']
-                        break
-                    elif 'first_air_date' in result and result['first_air_date']:
-                        date_str = result['first_air_date']
-                        break
-
+        if self.has_search_results(search_results):
+            for result in search_results['results']:
+                if result.get('release_date'):
+                    date_str = result.get('release_date')
+                    break
+                if result.get('first_air_date'):
+                    date_str = result.get('first_air_date')
+                    break
         if not date_str:
             logger.warning("No date found in search results.")
             return None, None  # No valid date found
+        return self.parse_date_string(date_str)
 
-        # Parsing the date and determining the quarter
+    def parse_date_string(self, date_str):
+        """Parse the given date as string and return year and quarter"""
         try:
             date = parser.parse(date_str)
             year = date.year
@@ -87,11 +87,4 @@ class TMDbHandler:
 
     def determine_quarter(self, month):
         """Determine the quarter from a month."""
-        if 1 <= month <= 3:
-            return 'first_quarter'
-        elif 4 <= month <= 6:
-            return 'second_quarter'
-        elif 7 <= month <= 9:
-            return 'third_quarter'
-        elif 10 <= month <= 12:
-            return 'fourth_quarter'
+        return f'{math.ceil(month / 3)}_quarter'

@@ -1,69 +1,69 @@
-import logging
 import os
+import logging
 from datetime import datetime
 
+
 class CustomFormatter(logging.Formatter):
-    """Custom formatter to add color to log messages based on their severity."""
-    COLORS = {
-        'INFO': '\033[94m',  # Blue
-        'WARNING': '\033[93m',  # Yellow
-        'ERROR': '\033[91m',  # Red
-        'DEBUG': '\033[92m',  # Green
-        'CRITICAL': '\033[95m',  # Magenta
-    }
+    # Removed color codes for better compatibility with different terminals
+    LOG_FMT = '%(asctime)s [%(levelname)s] %(message)s'
 
     def format(self, record):
-        log_fmt = '%(asctime)s [%(levelname)s] %(message)s'
-        formatter = logging.Formatter(log_fmt)
-        formatted_message = formatter.format(record)
-        color = self.COLORS.get(record.levelname, '\033[0m')  # Default to no color
-        return f'{color}{formatted_message}\033[0m'
+        formatter = logging.Formatter(self.LOG_FMT)
+        return formatter.format(record)
+
 
 class LevelFilter(logging.Filter):
-    """Filter that only allows messages of a specific log level."""
+    """
+    Custom filter.
+    Allow messages from self.level and higher, unless level is DEBUG.
+    In that case, only allow DEBUG
+    """
+
     def __init__(self, level):
         self.level = level
 
     def filter(self, record):
-        return record.levelno == self.level
+        if self.level == logging.DEBUG:
+            return record.levelno == self.level
+        else:
+            return record.levelno >= self.level
+
 
 def setup_logging():
-    log_dir = os.getenv('LOG_DIR', './logs')
-    os.makedirs(log_dir, exist_ok=True)
-
     logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)  # Capture all levels of logs
-
-    # Define log levels for separate files
+    logger.setLevel(logging.DEBUG)
     levels = {
         'DEBUG': logging.DEBUG,
         'INFO': logging.INFO,
         'WARNING': logging.WARNING,
         'ERROR': logging.ERROR,
-        'CRITICAL': logging.CRITICAL
+        'CRITICAL': logging.CRITICAL,
     }
-
-    # Set up file handlers for each log level with appropriate filters
     for level_name, level in levels.items():
-        date_str = datetime.now().strftime('%Y-%m-%d')
-        log_file_name = f'{date_str}-{level_name}-log.txt'
-        log_file_path = os.path.join(log_dir, log_file_name)
+        setup_logging_for_level(level_name, level, logger)
 
-        file_handler = logging.FileHandler(log_file_path, mode='a', encoding='utf-8')
-        file_handler.setLevel(level)
-        file_handler.addFilter(LevelFilter(level))  # Ensure only logs of the specific level are handled
-        file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
-        logger.addHandler(file_handler)
-
-    # Stream handler with custom formatting for console output
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(CustomFormatter())
-    console_handler.setLevel(logging.INFO)  # Display all levels of logs on console
+    console_handler.setLevel(logging.DEBUG)  # Changed level to DEBUG from INFO
     logger.addHandler(console_handler)
-
     return logger
+
+
+def setup_logging_for_level(level_name, level, logger):
+    log_dir = os.getenv('LOG_DIR', './logs')
+    os.makedirs(log_dir, exist_ok=True)
+    date_str = datetime.now().strftime('%Y-%m-%d')
+    log_file_name = f'{date_str}-{level_name}-log.txt'
+    log_file_path = os.path.join(log_dir, log_file_name)
+    file_handler = logging.FileHandler(log_file_path, mode='a', encoding='utf-8', delay=True)
+    file_handler.setLevel(level)
+    file_handler.addFilter(LevelFilter(level))
+    file_handler.setFormatter(logging.Formatter(CustomFormatter.LOG_FMT))
+    logger.addHandler(file_handler)
+
 
 def disable_logging():
     logging.disable(logging.CRITICAL)
+
 
 logger = setup_logging()

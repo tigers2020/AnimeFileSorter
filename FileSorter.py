@@ -1,87 +1,33 @@
 import json
 import os
 import shutil
-import sys
-from tqdm import tqdm
+from difflib import SequenceMatcher
 
-# Adding the 'src' directory to the system path to allow importing custom modules from it.
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+from src.log import logger
+from src.title_cleaner import TitleCleaner
+from src.tmdb_handler import TMDbHandler
 
-# Importing custom modules that handle different functionalities of the application.
-from tmdb_handler import TMDbHandler
-from title_cleaner import TitleCleaner
-from log import logger
 
-class FileOrganizer:
-    # Constructor of the FileOrganizer class.
-    def __init__(self, config_path):
-        # Opening and loading configuration from a JSON file.
-        with open(config_path, 'r', encoding='utf-8') as file:
-            self.config = json.load(file)
-        # Setting the base directory where files are stored, based on the config.
-        self.base_dir = self.config['base_dir']
-        # Creating instances of TMDbHandler and TitleCleaner using configurations.
-        self.tmdb_handler = TMDbHandler(self.config['api_key'])
-        self.title_cleaner = TitleCleaner()
-        # Initializing directories required for organizing files.
-        self.initialize_directories()
+class FileHandler:
+    FILE_TYPES = {
+        ".doc": "documents",
+        ".docx": "documents",
+        ".txt": "documents",
+        ".pdf": "documents",
+        ".zip": "subtitles",
+        ".rar": "subtitles",
+    }
 
-    def initialize_directories(self):
-        """Creates directories listed in the dirs dictionary if they don't exist."""
-        # Mapping directory names to their full paths.
-        self.dirs = {key: os.path.join(self.base_dir, name) for key, name in 
-                     [("animations","animations"),("subtitles", "subtitles"), ("documents", "documents"),
-                      ("others", "others"), ("duplicated", "duplicated"), 
-                      ("organized", "organized")]}
-        # Creating directories that don't exist using os.makedirs with exist_ok=True.
-        for path in self.dirs.values():
-            os.makedirs(path, exist_ok=True)
-
-    def organize_files(self, directory):
-        """Recursively handles the organization of files and directories within a specified directory."""
-        full_path = os.path.join(self.base_dir, directory)
-        try:
-            items = os.listdir(full_path)
-        except FileNotFoundError:
-            logger.error(f"Directory not found: {full_path}")
-            return
-        logger.info(f"Starting the file organization process in {full_path}.")
-        for item in tqdm(items, desc="Organizing files", unit="item"):
-            item_path = os.path.join(full_path, item)
-            if os.path.isdir(item_path):
-                self.organize_files(item_path)  # Recursively organize directories
-            else:
-                self.process_file(full_path, item)
-        logger.info(f"File organization process completed successfully for {full_path}.")
-
-    def process_file(self, directory, filename):
-        """Processes each file individually, determining its fate based on its contents and metadata."""
-        # Constructing the full path to the file.
-        file_path = os.path.join(directory, filename)
-        print(file_path)
-        # Cleaning and extracting relevant information from the filename.
-        clean_title = self.title_cleaner.clean_title(filename)
-        resolution = self.title_cleaner.extract_resolution(filename)
-        
-        # Deleting the file if its resolution is 1080p.
-        if resolution == "1080p":
-            os.remove(file_path)
-            logger.warning(f"Deleted {file_path} due to undesired resolution (1080p).")
-            return
-
-        # Searching for the file's metadata using its title.
-        search_results = self.search_until_found(clean_title, filename)
-        # Handling search results and organizing files accordingly.
-        if search_results:
-            preferred_title = self.tmdb_handler.get_titles(search_results) or "Unknown"
-            preferred_title = self.title_cleaner.sanitize_name(preferred_title.strip())
-            logger.info(f"Organizing files for title: {preferred_title}")
-        else:
-            preferred_title = "Unknown"
-            logger.error(f"Unable to find TV series or movies for any version of: {filename}")
-
-        # Moving the file to an appropriate directory based on the search results.
-        self.move_file_to_organized_dir(file_path, resolution, preferred_title, search_results)
+    def __init__(self, tmdb_handler, titleCleaner, base_dir):
+        self.tmdb_handler = tmdb_handler
+        self.title_cleaner = titleCleaner
+        self.dirs = {
+            "animations": os.path.join(base_dir, "animations"),
+            "organized": os.path.join(base_dir, "organized"),
+            "documents": os.path.join(base_dir, "documents"),
+            "subtitles": os.path.join(base_dir, "subtitles"),
+            "duplicated": os.path.join(base_dir, "duplicated"),
+        }
 
     def search_until_found(self, title, original_filename):
         """Searches for media by progressively shortening the title until a match is found or the title is exhausted."""
@@ -94,7 +40,6 @@ class FileOrganizer:
             current_title = ' '.join(current_title.split()[:-1])
             if current_title:
                 logger.info(f"Retrying with shortened title: {current_title}")
-
         # Logging an error if no media is found for the original filename.
         logger.error(f"No TV series or movies found for: {original_filename}")
         return None
@@ -103,46 +48,124 @@ class FileOrganizer:
         year, quarter = self.tmdb_handler.get_year_quarter(search_results) if search_results else (None, None)
         quarter_folder = quarter or "Unknown Quarter"
         year_folder = str(year) if year else "Unknown Year"
-        organized_dir = os.path.join(self.dirs["organized"], year_folder, quarter_folder, title, resolution)
-        os.makedirs(organized_dir, exist_ok=True)
+        organized_dir = os.path.join(self.dirs["organized"], year_folder, quarter_folder, title.strip(), resolution)
 
-        # File type handling
+        if organized_dir not in self.dirs:
+            try:
+                os.makedirs(organized_dir, exist_ok=True)
+            except OSError:
+                logger.error(f"Failed to create directory: {organized_dir}")
+            else:
+                self.dirs[organized_dir] = True
+
         extension = os.path.splitext(file_path)[1].lower()
-        file_types = {
-            ".doc": self.dirs["documents"],
-            ".docx": self.dirs["documents"],
-            ".txt": self.dirs["documents"],
-            ".pdf": self.dirs["documents"],
-            ".zip": self.dirs["subtitles"],
-            ".rar": self.dirs["subtitles"]
-        }
-        target_dir = file_types.get(extension, organized_dir)
-        target_file_path = os.path.join(target_dir, os.path.basename(file_path))
+        dir_type = self.FILE_TYPES.get(extension)
+        target_dir = self.dirs.get(dir_type, organized_dir)
+        base_name = os.path.basename(file_path)
+        target_file_path = os.path.join(target_dir, base_name)
 
-        # Move or duplicate file handling
+        action = 'Moved'
         try:
             if os.path.exists(target_file_path):
-                shutil.move(file_path, os.path.join(self.dirs["duplicated"], os.path.basename(file_path)))
-                logger.warning(f"Moved {file_path} to duplicated because a file with the same name exists.")
+                shutil.move(file_path, os.path.join(self.dirs["duplicated"], base_name))
+                action = 'Moved to duplicated because a file with the same name exists'
             else:
                 shutil.move(file_path, target_file_path)
-                logger.info(f"Moved {file_path} to {target_file_path}")
-                # Call to remove empty directories after moving a file
-                self.remove_empty_directories(os.path.dirname(file_path))
         except Exception as e:
             logger.error(f"Error moving {file_path} to {target_file_path}: {e}")
-    
-    def remove_empty_directories(self, root):
-        """Recursively remove empty directories from a specified root directory."""
-        for dirpath, dirnames, filenames in os.walk(root, topdown=False):
-            # Check each directory from bottom to top, removing empty directories
-            for dirname in dirnames:
-                full_path = os.path.join(dirpath, dirname)
-                if not os.listdir(full_path):
-                    os.rmdir(full_path)
-                    logger.info(f"Removed empty directory: {full_path}")
+        else:
+            logger.info(f"{action} {file_path} to {target_file_path}")
+            self.remove_empty_directories(os.path.dirname(file_path))
 
-# Main block to run the file organizer using a specific configuration file.
+    def remove_empty_directories(self, path):
+        if not os.path.isdir(path):
+            return
+
+        # remove empty subdirectories
+        files = os.listdir(path)
+
+        if len(files):
+            for f in files:
+                fullpath = os.path.join(path, f)
+                if os.path.isdir(fullpath):
+                    self.remove_empty_directories(fullpath)
+
+        # Modify the condition here
+        files = os.listdir(path)
+        if len(files) == 0 and 'Animations' not in path.split(os.path.sep):
+            os.rmdir(path)
+            logger.info(f"Deleted empty directory: {path}")
+
+
+class FileOrganizer:
+    # Constructor of the FileOrganizer class.
+    def __init__(self, config_path):
+        # Opening and loading configuration from a JSON file.
+        try:
+            with open(config_path, 'r', encoding='utf-8') as file:
+                self.config = json.load(file)
+        except FileNotFoundError:
+            logger.error(f"File {config_path} not found")
+            self.config = {}
+        # Setting the base directory where files are stored, based on the config.
+        self.base_dir = self.config['base_dir']
+        # Creating instances of TMDbHandler and TitleCleaner using configurations.
+        self.tmdb_handler = TMDbHandler(self.config['api_key'])
+        self.title_cleaner = TitleCleaner()
+        self.previous_clean_title = None
+        self.previous_search_results = None
+        self.file_handler = FileHandler(self.tmdb_handler, self.title_cleaner, self.base_dir)
+
+    def process_file(self, directory, filename):
+        """Processes each file individually, determining its fate based on its contents and metadata."""
+        # Constructing the full path to the file.
+        file_path = os.path.join(directory, filename)
+        logger.info(f"Processing file: {file_path}")
+        # Cleaning and extracting relevant information from the filename.
+        clean_title = self.title_cleaner.clean_title(filename)
+        resolution = self.title_cleaner.extract_resolution(filename)
+        search_results = []
+
+        # Searching for the file's metadata using its title.
+
+        if self.previous_clean_title is not None and SequenceMatcher(None, clean_title,
+                                                                     self.previous_clean_title).ratio() > 0.8:
+            logger.info(f"Skipping title: {clean_title} as it is similar to previous title {self.previous_clean_title}")
+            if self.previous_search_results is not None:
+                search_results = self.previous_search_results
+
+        else:
+            search_results = self.file_handler.search_until_found(clean_title, filename)
+            self.previous_clean_title = clean_title
+            self.previous_search_results = search_results
+
+        # Handling search results and organizing files accordingly.
+
+        if search_results:
+            preferred_title = self.tmdb_handler.first_title_from_search_results(search_results) or "Unknown"
+            preferred_title = self.title_cleaner.sanitize_name(preferred_title.strip())
+            logger.info(f"Organizing files for title: {preferred_title}")
+        else:
+            preferred_title = "Unknown"
+            logger.error(f"Unable to find TV series or movies for any version of: {filename}")
+            self.previous_preferred_title = preferred_title
+        self.previous_preferred_title = preferred_title
+
+        # Moving the file to an appropriate directory based on the search results.
+        self.file_handler.move_file_to_organized_dir(file_path, resolution, preferred_title.strip(), search_results)
+
+
+def main():
+    # Initialize with your configuration file path
+    file_organizer = FileOrganizer("src/config.json")
+    directory = "Animations"
+    # Iterate over all files in the directory
+    for filename in os.listdir(directory):
+        # Ignore directories, process only files
+        if os.path.isfile(os.path.join(directory, filename)):
+            # Call the process_file function on each file
+            file_organizer.process_file(directory, filename)
+
+
 if __name__ == "__main__":
-    organizer = FileOrganizer("./src/config.json")
-    organizer.organize_files("Animations")
+    main()
