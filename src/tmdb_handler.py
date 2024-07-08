@@ -3,10 +3,10 @@ import math
 import requests
 from dateutil import parser
 
-from .log import logger  # Assuming logger is configured appropriately in the log.py
+from src.log import logger  # Assuming logger is configured appropriately in the log.py
 
 
-class TMDbHandler:
+class TMDBHandler:
     def __init__(self, api_key, result_language='ko'):
         self.api_key = api_key
         self.result_language = result_language
