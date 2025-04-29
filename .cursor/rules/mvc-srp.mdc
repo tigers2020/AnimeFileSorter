@@ -1,0 +1,86 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+**MVC (Model-View-Controller) 룰**
+
+1. **구조 분리**  
+   - **Model**: 데이터 구조와 비즈니스 로직만 담당  
+   - **View**: 사용자 인터페이스 및 화면에 보이는 요소만 담당  
+   - **Controller**: 사용자 입력을 해석하고 Model과 View를 연결  
+
+2. **의존성 방향**  
+   - Controller → Model, Controller → View  
+   - Model과 View 간 직접 의존 금지  
+
+3. **데이터 흐름**  
+   1. 사용자 조작(클릭, 입력) → Controller에게 전달  
+   2. Controller는 Model을 변경하거나 조회  
+   3. Model 변경 시 이벤트/알림 발생 → View 갱신  
+
+4. **룰 요약**  
+   - View는 절대 비즈니스 로직을 포함하지 않는다  
+   - Model은 UI 코드에 관여하지 않는다  
+   - Controller는 중간자 역할만 수행하며, 로직과 UI를 섞지 않는다  
+
+---
+
+**SRP (Single Responsibility Principle) 룰**
+
+1. **단일 책임**  
+   - 클래스(또는 모듈)는 “오직 하나의 책임(reason to change)”만 가져야 함  
+
+2. **책임 분리**  
+   - 기능이 다르면 다른 클래스/모듈로 분리  
+   - 변경 이유가 두 개인 클래스는 분리 대상  
+
+3. **유지보수성**  
+   - 책임이 명확해지면 코드 이해·테스트·수정이 쉬워짐  
+
+4. **룰 요약**  
+   - 한 클래스에 비즈니스 로직·데이터 저장·UI 처리 섞지 않는다  
+   - 작은 단위로 쪼개어 각 클래스가 하나의 역할만 수행  
+
+---
+
+### 예시 코드
+
+```python
+# models/user.py
+class User:
+    """Model: User 데이터와 검증 로직만 담당."""
+    def __init__(self, name: str, email: str) -> None:
+        self.name = name
+        self.email = email
+
+    def is_valid_email(self) -> bool:
+        """Check if email format is correct."""
+        return "@" in self.email
+
+# views/user_view.py
+class UserView:
+    """View: 사용자 출력만 담당."""
+    def display_user(self, user: User) -> None:
+        print(f"Name: {user.name}, Email: {user.email}")
+
+# controllers/user_controller.py
+class UserController:
+    """Controller: 입력 처리 및 Model-View 연결만 담당."""
+    def __init__(self, model: User, view: UserView) -> None:
+        self.model = model
+        self.view = view
+
+    def update_email(self, new_email: str) -> None:
+        if self.model.is_valid_email():
+            self.model.email = new_email
+            self.view.display_user(self.model)
+        else:
+            print("Invalid email format")
+```
+
+위 구조에서  
+- `User` 클래스는 데이터 구조와 검증 로직만,  
+- `UserView` 클래스는 화면 출력만,  
+
+- `UserController` 클래스는 입력과 흐름 제어만 담당하여 MVC와 SRP를 모두 준수합니다.

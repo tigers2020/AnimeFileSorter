@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 from PySide6.QtCore import Qt, QSize, Slot
-from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QPixmap
+from PySide6.QtGui import QAction, QIcon, QPixmap, QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QMessageBox,
     QMenu,
-    QAction,
     QHeaderView
 )
 

@@ -20,7 +20,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QFileDialog,
-    QMessageBox
+    QMessageBox,
+    QStyle
 )
 
 from src.views.screens.dashboard_screen import DashboardScreen

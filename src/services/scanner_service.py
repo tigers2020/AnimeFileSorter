@@ -1,258 +1,208 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Scanner service for AnimeFileSorter.
+디렉토리를 스캔하여 미디어 파일을 찾는 서비스
 """
 
 import os
-import hashlib
-from datetime import datetime
+import asyncio
 from pathlib import Path
-from typing import List, Set, Optional, Callable, Dict, Any
+from typing import List, Set, Optional
 
-from src.models.media_item import MediaItem, FileType, MediaType
-from src.utils.logger import log_info, log_error, log_debug, log_warning
+from src.utils.logger import log_info, log_error, log_debug
 
 
 class ScannerService:
-    """Service for scanning directories and identifying media files."""
-    
-    # File extensions to include in scanning
-    VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v'}
-    SUBTITLE_EXTENSIONS = {'.srt', '.ass', '.ssa', '.vtt', '.sub'}
-    IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
+    """디렉토리를 스캔하여 미디어 파일을 찾는 서비스"""
     
     def __init__(self):
-        """Initialize the scanner service."""
-        self.excluded_dirs: Set[str] = {'.git', '__pycache__', 'venv', 'env'}
-        self.cancel_scan: bool = False
-        self.hash_chunk_size: int = 4096
-        self.max_hash_size: int = 100 * 1024 * 1024  # 100 MB
+        """스캐너 서비스 초기화"""
+        # 기본 비디오 파일 확장자
+        self.default_video_extensions = [
+            ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v", ".flv", ".webm"
+        ]
+        
+        # 자막 파일 확장자
+        self.subtitle_extensions = [
+            ".srt", ".ass", ".ssa", ".vtt", ".sub"
+        ]
+        
+        # 무시할 키워드 (샘플 파일 등)
+        self.ignore_keywords = [
+            "sample", "trailer", "preview", "teaser"
+        ]
     
-    def scan_directory(self, directory: str, 
-                      progress_callback: Optional[Callable[[int, int, str], None]] = None) -> List[MediaItem]:
+    async def scan_directory_async(
+        self,
+        directory: str,
+        recursive: bool = True,
+        extensions: Optional[List[str]] = None,
+        ignore_sample: bool = True
+    ) -> List[str]:
         """
-        Scan a directory for media files.
+        디렉토리를 비동기적으로 스캔하여 미디어 파일 목록을 반환합니다.
         
         Args:
-            directory: Directory to scan
-            progress_callback: Optional callback function to report progress
-                The callback receives (files_processed, total_files, current_file)
-                
-        Returns:
-            List of media items found
-        """
-        if not os.path.isdir(directory):
-            raise ValueError(f"Not a valid directory: {directory}")
-            
-        media_items: List[MediaItem] = []
-        self.cancel_scan = False
-        
-        # First, count total files for progress reporting
-        if progress_callback:
-            total_files = self._count_media_files(directory)
-            files_processed = 0
-            progress_callback(files_processed, total_files, "")
-        
-        for root, dirs, files in os.walk(directory):
-            if self.cancel_scan:
-                log_info("Scan cancelled by user")
-                break
-                
-            # Skip excluded directories
-            dirs[:] = [d for d in dirs if d not in self.excluded_dirs]
-            
-            for file in files:
-                if self.cancel_scan:
-                    break
-                    
-                file_path = os.path.join(root, file)
-                file_ext = os.path.splitext(file)[1].lower()
-                
-                # Process files based on extension
-                if file_ext in self.VIDEO_EXTENSIONS or file_ext in self.SUBTITLE_EXTENSIONS:
-                    try:
-                        if progress_callback:
-                            progress_callback(files_processed, total_files, file)
-                            
-                        media_item = self._create_media_item(file_path)
-                        media_items.append(media_item)
-                        
-                        if progress_callback:
-                            files_processed += 1
-                            
-                    except Exception as e:
-                        log_error(f"Error processing file {file_path}: {e}")
-        
-        log_info(f"Scan completed: {len(media_items)} files found")
-        return media_items
-    
-    def _count_media_files(self, directory: str) -> int:
-        """
-        Count the number of media files in a directory tree.
-        
-        Args:
-            directory: Directory to scan
+            directory: 스캔할 디렉토리 경로
+            recursive: 하위 디렉토리 포함 여부
+            extensions: 검색할 파일 확장자 목록 (None이면 기본값 사용)
+            ignore_sample: 샘플 파일 무시 여부
             
         Returns:
-            Number of media files found
+            미디어 파일 경로 목록
         """
-        count = 0
+        if not os.path.exists(directory):
+            log_error(f"디렉토리가 존재하지 않습니다: {directory}")
+            return []
         
-        for root, dirs, files in os.walk(directory):
-            dirs[:] = [d for d in dirs if d not in self.excluded_dirs]
+        if extensions is None:
+            extensions = self.default_video_extensions
             
-            for file in files:
-                file_ext = os.path.splitext(file)[1].lower()
-                if file_ext in self.VIDEO_EXTENSIONS or file_ext in self.SUBTITLE_EXTENSIONS:
-                    count += 1
+        # 소문자로 변환하여 비교 일관성 유지
+        extensions = [ext.lower() if not ext.startswith('.') else ext.lower() for ext in extensions]
+        extensions = [ext if ext.startswith('.') else f".{ext}" for ext in extensions]
         
-        return count
-    
-    def cancel_scanning(self) -> None:
-        """Cancel the current scanning operation."""
-        self.cancel_scan = True
-        log_info("Cancellation requested for scanning")
-    
-    def _create_media_item(self, file_path: str) -> MediaItem:
-        """
-        Create a MediaItem from a file path.
+        # 스캔 작업을 비동기로 실행
+        log_info(f"디렉토리 비동기 스캔 시작: {directory}")
         
-        Args:
-            file_path: Path to the file
-            
-        Returns:
-            MediaItem instance
-        """
-        path = Path(file_path)
-        stats = path.stat()
-        file_ext = path.suffix.lower()
-        
-        # Basic file information
-        media_item = MediaItem(
-            file_path=str(path),
-            file_name=path.name,
-            file_size=stats.st_size,
-            file_extension=file_ext,
-            file_modified=datetime.fromtimestamp(stats.st_mtime),
-            file_created=datetime.fromtimestamp(stats.st_ctime),
+        # 병렬 처리를 위한 태스크 생성
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(
+            self._scan_directory_task(directory, recursive, extensions, ignore_sample)
         )
         
-        # Only calculate hash for files under the size limit
-        if stats.st_size < self.max_hash_size:
-            media_item.file_hash = self._calculate_partial_hash(file_path)
-            log_debug(f"Calculated hash for: {path.name}")
-        else:
-            log_debug(f"Skipped hash calculation for large file: {path.name}")
-        
-        # Try to extract basic metadata from filename
-        self._extract_metadata_from_filename(media_item)
-        
-        return media_item
+        files = await task
+        log_info(f"스캔 완료: {len(files)}개 파일 발견")
+        return files
     
-    def _calculate_partial_hash(self, file_path: str) -> str:
+    async def _scan_directory_task(
+        self,
+        directory: str,
+        recursive: bool,
+        extensions: List[str],
+        ignore_sample: bool
+    ) -> List[str]:
         """
-        Calculate a partial hash for a file (first 1MB only).
+        디렉토리 스캔 비동기 태스크
         
         Args:
-            file_path: Path to the file
+            directory: 스캔할 디렉토리 경로
+            recursive: 하위 디렉토리 포함 여부
+            extensions: 검색할 파일 확장자 목록
+            ignore_sample: 샘플 파일 무시 여부
             
         Returns:
-            File hash as a string
+            미디어 파일 경로 목록
         """
-        hash_md5 = hashlib.md5()
-        bytes_to_read = min(1024 * 1024, os.path.getsize(file_path))  # First 1MB or file size
+        files = []
         
-        with open(file_path, "rb") as f:
-            # Read first bytes
-            data = f.read(bytes_to_read)
-            hash_md5.update(data)
-            
-            # Read last bytes if file is large enough
-            if os.path.getsize(file_path) > bytes_to_read * 2:
-                f.seek(-bytes_to_read, 2)  # Seek from end
-                data = f.read(bytes_to_read)
-                hash_md5.update(data)
-                
-        return hash_md5.hexdigest()
+        # CPU 바운드 작업은 별도 스레드에서 실행
+        # 이를 통해 UI 스레드 블로킹 방지
+        files = await asyncio.get_event_loop().run_in_executor(
+            None,  # 기본 실행자 사용
+            self._scan_directory_sync,
+            directory, recursive, extensions, ignore_sample
+        )
+        
+        return files
     
-    def _extract_metadata_from_filename(self, media_item: MediaItem) -> None:
+    def _scan_directory_sync(
+        self,
+        directory: str,
+        recursive: bool,
+        extensions: List[str],
+        ignore_sample: bool
+    ) -> List[str]:
         """
-        Extract basic metadata from the filename and update the media item.
+        디렉토리를 동기적으로 스캔하여 미디어 파일 목록을 반환합니다.
         
         Args:
-            media_item: The media item to update
-        """
-        # This is a simple implementation - would be expanded in MetadataService
-        filename = media_item.file_name
-        name_without_ext = os.path.splitext(filename)[0]
-        
-        # Very simple example patterns - to be expanded
-        # e.g., "Show Name - S01E02 - Episode Title.mkv"
-        import re
-        
-        # Try to identify if it's an episode
-        episode_pattern = re.compile(r"(.+?)[\s.-]*[Ss](\d+)[Ee](\d+)(?:[\s.-]*(.+))?", re.IGNORECASE)
-        match = episode_pattern.match(name_without_ext)
-        
-        if match:
-            media_item.media_type = MediaType.SERIES
-            media_item.title = match.group(1).replace(".", " ").strip()
-            media_item.metadata["season"] = int(match.group(2))
-            media_item.metadata["episode"] = int(match.group(3))
-            if match.group(4):
-                media_item.metadata["episode_title"] = match.group(4).replace(".", " ").strip()
-        else:
-            # Try to identify if it's a movie
-            movie_pattern = re.compile(r"(.+?)[\s.-]*\((\d{4})\)", re.IGNORECASE)
-            match = movie_pattern.match(name_without_ext)
+            directory: 스캔할 디렉토리 경로
+            recursive: 하위 디렉토리 포함 여부
+            extensions: 검색할 파일 확장자 목록
+            ignore_sample: 샘플 파일 무시 여부
             
-            if match:
-                media_item.media_type = MediaType.MOVIE
-                media_item.title = match.group(1).replace(".", " ").strip()
-                media_item.year = int(match.group(2))
+        Returns:
+            미디어 파일 경로 목록
+        """
+        files = []
+        
+        try:
+            if recursive:
+                # 재귀적으로 모든 파일 스캔
+                for root, _, filenames in os.walk(directory):
+                    for filename in filenames:
+                        file_path = os.path.join(root, filename)
+                        if self._is_media_file(file_path, extensions, ignore_sample):
+                            files.append(file_path)
             else:
-                # Default: use the filename as title
-                media_item.title = name_without_ext.replace(".", " ")
+                # 현재 디렉토리만 스캔
+                for filename in os.listdir(directory):
+                    file_path = os.path.join(directory, filename)
+                    if os.path.isfile(file_path) and self._is_media_file(file_path, extensions, ignore_sample):
+                        files.append(file_path)
+                        
+            log_debug(f"{len(files)}개 파일 스캔됨")
+        except Exception as e:
+            log_error(f"디렉토리 스캔 중 오류 발생: {e}")
+        
+        return files
     
-    def scan_for_duplicates(self, media_items: List[MediaItem]) -> List[List[MediaItem]]:
+    def _is_media_file(
+        self,
+        file_path: str,
+        extensions: List[str],
+        ignore_sample: bool
+    ) -> bool:
         """
-        Find duplicate files in a list of media items.
+        파일이 미디어 파일인지 확인합니다.
         
         Args:
-            media_items: List of media items to check
+            file_path: 확인할 파일 경로
+            extensions: 미디어 파일 확장자 목록
+            ignore_sample: 샘플 파일 무시 여부
             
         Returns:
-            List of lists, where each inner list contains duplicate items
+            미디어 파일 여부
         """
-        # Group by file size first (quick check)
-        size_groups = {}
-        for item in media_items:
-            if item.file_size not in size_groups:
-                size_groups[item.file_size] = []
-            size_groups[item.file_size].append(item)
+        # 확장자 확인
+        _, ext = os.path.splitext(file_path.lower())
+        if ext not in extensions:
+            return False
         
-        # Calculate hashes only for files with the same size
-        duplicates = []
-        for size, items in size_groups.items():
-            if len(items) > 1:
-                # Calculate hashes if not already done
-                for item in items:
-                    if item.file_hash is None and os.path.getsize(item.file_path) < self.max_hash_size:
-                        item.file_hash = self._calculate_partial_hash(item.file_path)
-                
-                # Group by hash
-                hash_groups = {}
-                for item in items:
-                    if item.file_hash:
-                        if item.file_hash not in hash_groups:
-                            hash_groups[item.file_hash] = []
-                        hash_groups[item.file_hash].append(item)
-                
-                # Add duplicate groups to the result
-                for hash_val, hash_items in hash_groups.items():
-                    if len(hash_items) > 1:
-                        duplicates.append(hash_items)
+        # 샘플 파일 확인
+        if ignore_sample:
+            filename = os.path.basename(file_path).lower()
+            if any(keyword in filename for keyword in self.ignore_keywords):
+                log_debug(f"샘플 파일 무시됨: {filename}")
+                return False
         
-        log_info(f"Found {len(duplicates)} sets of duplicate files")
-        return duplicates 
+        return True
+    
+    def scan_directory(
+        self,
+        directory: str,
+        recursive: bool = True,
+        extensions: Optional[List[str]] = None,
+        ignore_sample: bool = True
+    ) -> List[str]:
+        """
+        디렉토리를 동기적으로 스캔하여 미디어 파일 목록을 반환합니다.
+        
+        Args:
+            directory: 스캔할 디렉토리 경로
+            recursive: 하위 디렉토리 포함 여부
+            extensions: 검색할 파일 확장자 목록 (None이면 기본값 사용)
+            ignore_sample: 샘플 파일 무시 여부
+            
+        Returns:
+            미디어 파일 경로 목록
+        """
+        if extensions is None:
+            extensions = self.default_video_extensions
+            
+        # 소문자로 변환하여 비교 일관성 유지
+        extensions = [ext.lower() if not ext.startswith('.') else ext.lower() for ext in extensions]
+        extensions = [ext if ext.startswith('.') else f".{ext}" for ext in extensions]
+        
+        return self._scan_directory_sync(directory, recursive, extensions, ignore_sample) 

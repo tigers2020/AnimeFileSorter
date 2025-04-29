@@ -11,24 +11,37 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Set
 
 from src.models.media_item import MediaItem, MediaType, Series, Movie
+from src.utils.logger import log_info, log_error, log_debug
+from src.database.db_manager import DatabaseManager
+from src.services.setting_service import SettingService
 
 
 class OrganizerService:
     """Service for organizing media files according to patterns and rules."""
     
-    def __init__(self):
-        """Initialize the organizer service."""
-        # Default patterns for destination paths
-        self.series_folder_pattern = "{series_name}"
-        self.season_folder_pattern = "Season {season_number}"
-        self.episode_file_pattern = "{series_name} - S{season_number}E{episode_number} - {episode_title}"
-        self.movie_file_pattern = "{title} ({year})"
+    def __init__(self, setting_service: SettingService = None, db_manager: DatabaseManager = None):
+        """
+        Initialize the organizer service.
         
-        # Organization settings
-        self.create_series_folders = True
-        self.create_season_folders = True
-        self.preserve_original_extension = True
-        self.move_subtitles = True
+        Args:
+            setting_service: 설정 서비스 인스턴스
+            db_manager: 데이터베이스 관리자 인스턴스
+        """
+        self.db_manager = db_manager or DatabaseManager()
+        self.setting_service = setting_service or SettingService(self.db_manager)
+        
+        # 설정에서 값 가져오기
+        self.series_folder_pattern = self.setting_service.get_setting("series_folder_pattern")
+        self.season_folder_pattern = self.setting_service.get_setting("season_folder_pattern")
+        self.create_series_folders = self.setting_service.get_setting("create_series_folders")
+        self.create_season_folders = self.setting_service.get_setting("create_season_folders")
+        self.preserve_original_filename = self.setting_service.get_setting("preserve_original_filename")
+        self.move_subtitles = self.setting_service.get_setting("move_subtitles")
+        self.operation_type = self.setting_service.get_setting("operation_type")
+        self.organize_by_type = self.setting_service.get_setting("organize_by_type")
+        self.movies_folder_name = self.setting_service.get_setting("movies_folder_name")
+        self.series_folder_name = self.setting_service.get_setting("series_folder_name")
+        self.unsorted_folder_name = self.setting_service.get_setting("unsorted_folder_name")
     
     def organize_files(
         self,
@@ -60,6 +73,9 @@ class OrganizerService:
                 if not preview_only:
                     self._execute_file_operation(item.file_path, dest_path)
                     
+                    # DB에 처리 기록 저장
+                    self._record_media_processing(item, dest_path)
+                    
                     # If we should also move subtitle files
                     if self.move_subtitles:
                         subtitle_files = self._find_related_subtitle_files(item.file_path)
@@ -74,8 +90,7 @@ class OrganizerService:
                             if not preview_only:
                                 self._execute_file_operation(sub_file, sub_dest)
             except Exception as e:
-                # In a real application, we'd log the error
-                print(f"Error organizing file {item.file_path}: {e}")
+                log_error(f"Error organizing file {item.file_path}: {e}")
         
         return operations
     
@@ -90,18 +105,21 @@ class OrganizerService:
         Returns:
             Destination path
         """
-        # In a real implementation, we'd parse the filename to extract
-        # series/season/episode info, or use metadata from external sources
-        
-        if isinstance(item, Series) or item.media_type == MediaType.SERIES:
-            # Process as a series
-            return self._get_series_destination(item, output_directory)
-        elif isinstance(item, Movie) or item.media_type == MediaType.MOVIE:
-            # Process as a movie
-            return self._get_movie_destination(item, output_directory)
+        # 추출된 타이틀이 있으면 사용, 없으면 파일 이름에서 추출
+        if item.title:
+            if isinstance(item, Series) or item.media_type == MediaType.SERIES:
+                # Process as a series
+                return self._get_series_destination(item, output_directory)
+            elif isinstance(item, Movie) or item.media_type == MediaType.MOVIE:
+                # Process as a movie
+                return self._get_movie_destination(item, output_directory)
+            else:
+                # 타입이 없지만 타이틀은 있는 경우 기본 폴더에 정리
+                folder_name = item.title.strip()
+                return os.path.join(output_directory, folder_name, item.file_name)
         else:
-            # Default organization (just put in root output dir)
-            return os.path.join(output_directory, item.file_name)
+            # 타이틀이 없으면 기본 폴더에 원본 파일명 그대로 저장
+            return os.path.join(output_directory, self.unsorted_folder_name, item.file_name)
     
     def _get_series_destination(self, item: MediaItem, output_directory: str) -> str:
         """
@@ -114,31 +132,35 @@ class OrganizerService:
         Returns:
             Destination path
         """
-        # For now, use a simple pattern match on the filename
-        # In a real implementation, we'd use proper metadata extraction
-        series_info = self._extract_series_info_from_filename(item.file_name)
+        # 아이템 메타데이터 사용 또는 파일명에서 추출
+        series_name = item.title
+        season_number = item.metadata.get("season", 1)
+        
+        # 시즌 정보가 없을 경우 파일명에서 다시 한번 시도
+        if "season" not in item.metadata:
+            series_info = self._extract_series_info_from_filename(item.file_name)
+            season_number = series_info.get("season_number", 1)
         
         # Prepare values for path pattern
         values = {
-            "series_name": series_info.get("series_name", "Unknown Series"),
-            "season_number": str(series_info.get("season_number", 1)).zfill(2),
-            "episode_number": str(series_info.get("episode_number", 1)).zfill(2),
-            "episode_title": series_info.get("episode_title", "")
+            "series_name": series_name,
+            "season_number": str(season_number).zfill(2)
         }
         
-        # Build the path
+        # Build the path - 폴더 구조만 생성하고 파일 이름은 원본 유지
         series_folder = self.series_folder_pattern.format(**values) if self.create_series_folders else ""
         season_folder = self.season_folder_pattern.format(**values) if self.create_season_folders else ""
         
-        # Format the filename using the pattern
-        file_name = self.episode_file_pattern.format(**values)
-        
-        # Add the original extension if needed
-        if self.preserve_original_extension:
-            file_name += item.file_extension
+        # 원본 파일명 유지
+        file_name = item.file_name
         
         # Construct the full path
         path_parts = [output_directory]
+        
+        # 카테고리별 구성 시 시리즈 루트 폴더 추가
+        if self.organize_by_type:
+            path_parts.append(self.series_folder_name)
+            
         if series_folder:
             path_parts.append(series_folder)
         if season_folder:
@@ -163,25 +185,30 @@ class OrganizerService:
         Returns:
             Destination path
         """
-        # For now, use a simple pattern match on the filename
-        # In a real implementation, we'd use proper metadata extraction
-        movie_info = self._extract_movie_info_from_filename(item.file_name)
+        # 아이템 메타데이터 사용
+        title = item.title
+        year = item.year or ""
         
-        # Prepare values for path pattern
-        values = {
-            "title": movie_info.get("title", "Unknown Movie"),
-            "year": movie_info.get("year", "")
-        }
+        # 폴더명 생성
+        if year:
+            folder_name = f"{title} ({year})"
+        else:
+            folder_name = title
         
-        # Format the filename using the pattern
-        file_name = self.movie_file_pattern.format(**values)
-        
-        # Add the original extension if needed
-        if self.preserve_original_extension:
-            file_name += item.file_extension
+        # 원본 파일명 유지
+        file_name = item.file_name
         
         # Construct the full path
-        dest_path = os.path.join(output_directory, "Movies", file_name)
+        path_parts = [output_directory]
+        
+        # 카테고리별 구성 시 영화 루트 폴더 추가
+        if self.organize_by_type:
+            path_parts.append(self.movies_folder_name)
+            
+        path_parts.append(folder_name)
+        path_parts.append(file_name)
+        
+        dest_path = os.path.join(*path_parts)
         
         # Ensure the directory exists
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
@@ -272,9 +299,61 @@ class OrganizerService:
         # Ensure the destination directory exists
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         
-        # For now, just copy the file
-        # In a real implementation, we'd have a setting to control copy vs. move
-        shutil.copy2(source_path, dest_path)
+        operation_success = False
+        error_message = None
+        
+        try:
+            # Operation based on settings
+            if self.operation_type.upper() == "MOVE":
+                shutil.move(source_path, dest_path)
+                log_info(f"파일 이동됨: {os.path.basename(source_path)} → {os.path.dirname(dest_path)}")
+                operation_success = True
+            else:  # Default to COPY
+                shutil.copy2(source_path, dest_path)
+                log_info(f"파일 복사됨: {os.path.basename(source_path)} → {os.path.dirname(dest_path)}")
+                operation_success = True
+        except Exception as e:
+            error_message = str(e)
+            log_error(f"파일 작업 실패 ({self.operation_type}): {error_message}")
+            raise
+        finally:
+            # 기록 저장
+            if self.db_manager:
+                self.db_manager.record_organization_operation(
+                    source_path=source_path,
+                    destination_path=dest_path,
+                    operation_type=self.operation_type.upper(),
+                    success=operation_success,
+                    error_message=error_message
+                )
+    
+    def _record_media_processing(self, item: MediaItem, destination_path: str) -> None:
+        """
+        미디어 처리 정보를 데이터베이스에 기록합니다.
+        
+        Args:
+            item: 처리된 미디어 아이템
+            destination_path: 파일 목적지 경로
+        """
+        if not self.db_manager:
+            return
+            
+        media_data = {
+            'file_path': item.file_path,
+            'media_type': item.media_type.value if hasattr(item.media_type, 'value') else str(item.media_type),
+            'title': item.title,
+            'year': item.year,
+            'original_filename': item.file_name,
+            'destination_path': destination_path,
+            'processed': True
+        }
+        
+        # 시리즈인 경우 추가 정보
+        if isinstance(item, Series) or item.media_type == MediaType.SERIES:
+            media_data['season'] = item.metadata.get('season', 1)
+            media_data['episode'] = item.metadata.get('episode', 1)
+            
+        self.db_manager.save_media_item(media_data)
     
     def _find_related_subtitle_files(self, video_path: str) -> List[str]:
         """
@@ -286,6 +365,10 @@ class OrganizerService:
         Returns:
             List of paths to related subtitle files
         """
+        # 설정에서 자막 확장자 가져오기
+        subtitle_extensions_str = self.setting_service.get_setting("subtitle_extensions")
+        subtitle_extensions = subtitle_extensions_str.split(',') if subtitle_extensions_str else ['.srt', '.ass', '.ssa', '.vtt', '.sub']
+        
         # Get the directory and filename without extension
         directory = os.path.dirname(video_path)
         filename_base = os.path.splitext(os.path.basename(video_path))[0]
@@ -293,7 +376,7 @@ class OrganizerService:
         # Find all files with subtitle extensions that match the base filename
         subtitle_files = []
         for file in os.listdir(directory):
-            if any(file.endswith(ext) for ext in ['.srt', '.ass', '.ssa', '.vtt', '.sub']):
+            if any(file.endswith(ext) for ext in subtitle_extensions):
                 if file.startswith(filename_base) or filename_base in file:
                     subtitle_files.append(os.path.join(directory, file))
         

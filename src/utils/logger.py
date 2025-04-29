@@ -70,6 +70,53 @@ class Logger:
 logger = Logger().get_logger()
 
 
+def configure_logger(level: int = logging.INFO, log_dir: Optional[str] = None) -> None:
+    """
+    로거 설정을 변경합니다.
+    
+    Args:
+        level: 로깅 레벨
+        log_dir: 로그 파일을 저장할 디렉토리 (None이면 기본값 사용)
+    """
+    # 기존 핸들러 제거
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    
+    # 로깅 레벨 설정
+    logger.setLevel(level)
+    
+    # 로그 디렉토리 설정
+    if log_dir is not None:
+        logs_dir = Path(log_dir)
+    else:
+        logs_dir = Path.cwd() / "logs"
+    
+    logs_dir.mkdir(exist_ok=True)
+    
+    # 파일 핸들러 설정
+    log_file = logs_dir / f"animefilesorter_{datetime.now().strftime('%Y%m%d')}.log"
+    file_handler = logging.FileHandler(str(log_file), encoding="utf-8")
+    file_handler.setLevel(logging.DEBUG)
+    
+    # 콘솔 핸들러 설정
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(level)
+    
+    # 포매터 설정
+    formatter = logging.Formatter(
+        "[%(asctime)s] [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # 핸들러 추가
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    log_info(f"로거 설정 완료 (레벨: {logging.getLevelName(level)})")
+
+
 def log_exception(e: Exception) -> None:
     """
     Log an exception with full traceback.
