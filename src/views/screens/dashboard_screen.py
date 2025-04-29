@@ -4,7 +4,7 @@
 Dashboard screen for AnimeFileSorter.
 """
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -14,7 +14,9 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QGridLayout,
     QSpacerItem,
-    QSizePolicy
+    QSizePolicy,
+    QFrame,
+    QScrollArea
 )
 
 
@@ -42,18 +44,59 @@ class StatCard(QGroupBox):
         self.layout.addWidget(self.desc_label)
 
 
-class DashboardScreen(QWidget):
+class RecentActivityItem(QFrame):
+    """A widget to display a recent activity item."""
+    
+    def __init__(self, title, datetime, description="", parent=None):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setFrameShadow(QFrame.Raised)
+        
+        # Layout
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+        
+        # Title
+        title_label = QLabel(title)
+        font = title_label.font()
+        font.setBold(True)
+        title_label.setFont(font)
+        
+        # Date and time
+        datetime_label = QLabel(datetime)
+        
+        # Description
+        desc_label = QLabel(description)
+        desc_label.setWordWrap(True)
+        
+        # Add widgets to layout
+        layout.addWidget(title_label)
+        layout.addWidget(datetime_label)
+        if description:
+            layout.addWidget(desc_label)
+
+
+class DashboardScreen(QScrollArea):
     """Dashboard screen displaying overview of the application."""
     
     def __init__(self):
         super().__init__()
+        
+        # Make the scroll area fill the container
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.NoFrame)
+        
+        # Content widget
+        self.content = QWidget()
+        self.setWidget(self.content)
+        
         self.init_ui()
     
     def init_ui(self):
         """Initialize the UI components."""
         # Main layout
         layout = QVBoxLayout()
-        self.setLayout(layout)
+        self.content.setLayout(layout)
         
         # Welcome section
         welcome_layout = QHBoxLayout()
@@ -70,17 +113,17 @@ class DashboardScreen(QWidget):
         # Quick actions
         quick_actions_layout = QHBoxLayout()
         
-        scan_button = QPushButton("폴더 스캔")
-        scan_button.setMinimumSize(150, 40)
-        quick_actions_layout.addWidget(scan_button)
+        self.scan_button = QPushButton("폴더 스캔")
+        self.scan_button.setMinimumSize(150, 40)
+        quick_actions_layout.addWidget(self.scan_button)
         
-        organize_button = QPushButton("파일 정리")
-        organize_button.setMinimumSize(150, 40)
-        quick_actions_layout.addWidget(organize_button)
+        self.organize_button = QPushButton("파일 정리")
+        self.organize_button.setMinimumSize(150, 40)
+        quick_actions_layout.addWidget(self.organize_button)
         
-        settings_button = QPushButton("설정")
-        settings_button.setMinimumSize(150, 40)
-        quick_actions_layout.addWidget(settings_button)
+        self.settings_button = QPushButton("설정")
+        self.settings_button.setMinimumSize(150, 40)
+        quick_actions_layout.addWidget(self.settings_button)
         
         quick_actions_layout.addStretch()
         
@@ -93,14 +136,14 @@ class DashboardScreen(QWidget):
         
         stats_grid = QGridLayout()
         
-        # Sample stats cards - these would be updated with real data
-        total_files = StatCard("총 파일", "0", "관리 중인 파일")
-        organized_files = StatCard("정리된 파일", "0", "분류된 파일")
-        duplicate_files = StatCard("중복 파일", "0", "발견된 중복")
+        # Stats cards - these will be updated from the main window
+        self.total_files = StatCard("총 파일", "0", "관리 중인 파일")
+        self.organized_files = StatCard("정리된 파일", "0", "분류된 파일")
+        self.duplicate_files = StatCard("중복 파일", "0", "발견된 중복")
         
-        stats_grid.addWidget(total_files, 0, 0)
-        stats_grid.addWidget(organized_files, 0, 1)
-        stats_grid.addWidget(duplicate_files, 0, 2)
+        stats_grid.addWidget(self.total_files, 0, 0)
+        stats_grid.addWidget(self.organized_files, 0, 1)
+        stats_grid.addWidget(self.duplicate_files, 0, 2)
         
         # Recent activity section
         recent_label = QLabel("최근 활동")
@@ -109,8 +152,17 @@ class DashboardScreen(QWidget):
         font.setBold(True)
         recent_label.setFont(font)
         
-        recent_activity = QLabel("최근 활동이 없습니다.")
-        recent_activity.setAlignment(Qt.AlignCenter)
+        # Activity list container
+        self.activity_layout = QVBoxLayout()
+        
+        # Add sample activity items (these will be replaced with real data)
+        self.activity_layout.addWidget(
+            RecentActivityItem(
+                "애플리케이션 시작", 
+                "방금", 
+                "AnimeFileSorter가 실행되었습니다."
+            )
+        )
         
         # Add all sections to main layout
         layout.addLayout(welcome_layout)
@@ -121,23 +173,57 @@ class DashboardScreen(QWidget):
         layout.addLayout(stats_grid)
         layout.addSpacing(30)
         layout.addWidget(recent_label)
-        layout.addWidget(recent_activity)
+        layout.addLayout(self.activity_layout)
         layout.addStretch()
+    
+    def add_activity(self, title, datetime, description=""):
+        """
+        Add a new activity to the recent activity list.
         
-        # Connect signals
-        scan_button.clicked.connect(self.on_scan_clicked)
-        organize_button.clicked.connect(self.on_organize_clicked)
-        settings_button.clicked.connect(self.on_settings_clicked)
+        Args:
+            title: Title of the activity
+            datetime: Date and time of the activity
+            description: Optional description
+        """
+        # Create a new activity item
+        activity_item = RecentActivityItem(title, datetime, description)
+        
+        # Add it to the beginning of the list
+        self.activity_layout.insertWidget(0, activity_item)
+        
+        # Limit the number of items (keep only the 5 most recent)
+        if self.activity_layout.count() > 5:
+            # Get the last item
+            item = self.activity_layout.itemAt(self.activity_layout.count() - 1)
+            if item:
+                # Remove and delete the widget
+                widget = item.widget()
+                if widget:
+                    self.activity_layout.removeWidget(widget)
+                    widget.deleteLater()
     
-    def on_scan_clicked(self):
-        """Handle scan button click."""
-        # This would be connected to the controller/parent window
-        print("Scan button clicked")
+    def clear_activities(self):
+        """Clear all activity items."""
+        # Remove all widgets from the layout
+        while self.activity_layout.count():
+            item = self.activity_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
     
-    def on_organize_clicked(self):
-        """Handle organize button click."""
-        print("Organize button clicked")
-    
-    def on_settings_clicked(self):
-        """Handle settings button click."""
-        print("Settings button clicked") 
+    def update_statistics(self, total_files=None, organized_files=None, duplicate_files=None):
+        """
+        Update the statistics cards.
+        
+        Args:
+            total_files: Number of total files
+            organized_files: Number of organized files
+            duplicate_files: Number of duplicate files
+        """
+        if total_files is not None:
+            self.total_files.value_label.setText(str(total_files))
+            
+        if organized_files is not None:
+            self.organized_files.value_label.setText(str(organized_files))
+            
+        if duplicate_files is not None:
+            self.duplicate_files.value_label.setText(str(duplicate_files)) 
