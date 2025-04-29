@@ -5,6 +5,8 @@
 """
 
 from typing import Dict, Any, Optional
+import os
+from pathlib import Path
 
 from src.database.db_manager import DatabaseManager
 from src.utils.logger import log_info, log_error, log_debug
@@ -15,6 +17,11 @@ class SettingService:
     
     # 기본 설정값
     DEFAULT_SETTINGS = {
+        # 기본 경로 설정
+        "input_directory": "",
+        "output_directory": "",
+        "last_used_directory": "",
+        
         # 폴더 패턴 설정
         "series_folder_pattern": "{series_name}",
         "season_folder_pattern": "Season {season_number}",
@@ -38,7 +45,21 @@ class SettingService:
         "organize_by_type": True,  # 시리즈와 영화 분리
         "movies_folder_name": "Movies",
         "series_folder_name": "Series",
-        "unsorted_folder_name": "Unsorted"
+        "unsorted_folder_name": "Unsorted",
+        
+        # API 설정
+        "tmdb_api_key": "",  
+        "anilist_api_key": "",
+        "use_external_api": False,
+        
+        # 메타데이터 설정
+        "auto_fetch_metadata": False,
+        "overwrite_existing_metadata": False,
+        "language": "ko-KR",
+        
+        # 기타 설정
+        "auto_save_settings": True,
+        "check_updates": True
     }
     
     def __init__(self, db_manager: DatabaseManager = None):
@@ -51,6 +72,20 @@ class SettingService:
         self.db_manager = db_manager or DatabaseManager()
         self.settings = {}
         self.load_settings()
+        
+        # 경로 설정이 비어있을 경우 작업 디렉토리를 기본값으로 설정
+        if not self.settings.get("input_directory"):
+            self.settings["input_directory"] = str(Path.cwd())
+            
+        if not self.settings.get("output_directory"):
+            self.settings["output_directory"] = str(Path.cwd() / "organized")
+            
+        if not self.settings.get("last_used_directory"):
+            self.settings["last_used_directory"] = str(Path.home())
+            
+        # 설정이 로드된 후 자동 저장
+        if self.settings.get("auto_save_settings", True):
+            self.save_settings()
     
     def load_settings(self) -> Dict[str, Any]:
         """
@@ -155,4 +190,48 @@ class SettingService:
         Returns:
             전체 설정 딕셔너리
         """
-        return self.settings.copy() 
+        return self.settings.copy()
+        
+    def get_input_directory(self) -> str:
+        """
+        입력 디렉토리 경로를 가져옵니다.
+        
+        Returns:
+            입력 디렉토리 경로
+        """
+        return self.get_setting("input_directory", "")
+        
+    def get_output_directory(self) -> str:
+        """
+        출력 디렉토리 경로를 가져옵니다.
+        
+        Returns:
+            출력 디렉토리 경로
+        """
+        return self.get_setting("output_directory", "")
+    
+    def set_directories(self, input_dir: str = None, output_dir: str = None) -> bool:
+        """
+        입력 및 출력 디렉토리를 설정합니다.
+        
+        Args:
+            input_dir: 입력 디렉토리 경로
+            output_dir: 출력 디렉토리 경로
+            
+        Returns:
+            성공 여부
+        """
+        settings_to_update = {}
+        
+        if input_dir:
+            input_dir = os.path.abspath(input_dir)
+            settings_to_update["input_directory"] = input_dir
+            settings_to_update["last_used_directory"] = os.path.dirname(input_dir)
+            
+        if output_dir:
+            output_dir = os.path.abspath(output_dir)
+            settings_to_update["output_directory"] = output_dir
+            
+        if settings_to_update:
+            return self.update_settings(settings_to_update)
+        return True 

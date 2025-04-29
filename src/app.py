@@ -38,8 +38,9 @@ class Application:
             db_manager=self.db_manager
         )
         
-        self.input_dir = None
-        self.output_dir = None
+        # 디렉토리 설정은 이제 설정 서비스에서 로드
+        self.input_dir = self.setting_service.get_input_directory()
+        self.output_dir = self.setting_service.get_output_directory()
         self.preview_mode = False
     
     def configure(self, args: argparse.Namespace) -> None:
@@ -49,31 +50,36 @@ class Application:
         Args:
             args: 커맨드 라인 인자
         """
-        # 필수 인자가 있을 경우에만 설정
+        # 임시 설정 딕셔너리
+        settings_to_update = {}
+        
+        # 디렉토리 설정
         if hasattr(args, 'input_dir') and args.input_dir:
             self.input_dir = args.input_dir
+            settings_to_update["input_directory"] = args.input_dir
         
         if hasattr(args, 'output_dir') and args.output_dir:
             self.output_dir = args.output_dir
-            
+            settings_to_update["output_directory"] = args.output_dir
+        
+        # 미리보기 모드
         if hasattr(args, 'preview'):
             self.preview_mode = args.preview
-        
-        # 명령줄에서 설정이 제공된 경우 업데이트
-        settings_to_update = {}
-        
+            
+        # 기타 설정
         if hasattr(args, 'operation') and args.operation:
             settings_to_update["operation_type"] = args.operation
             
-        if hasattr(args, 'recursive') and args.recursive is not None:
+        if hasattr(args, 'recursive') is not None and args.recursive is not None:
             settings_to_update["scan_recursive"] = args.recursive
             
-        if hasattr(args, 'preserve_filename') and args.preserve_filename is not None:
+        if hasattr(args, 'preserve_filename') is not None and args.preserve_filename is not None:
             settings_to_update["preserve_original_filename"] = args.preserve_filename
         
+        # 설정 저장
         if settings_to_update:
             self.setting_service.update_settings(settings_to_update)
-            log_info("임시 설정이 적용되었습니다")
+            log_info("설정이 저장되었습니다")
     
     async def run(self) -> int:
         """
@@ -95,6 +101,12 @@ class Application:
             if not os.path.exists(self.input_dir):
                 log_error(f"입력 디렉토리를 찾을 수 없습니다: {self.input_dir}")
                 return 1
+                
+            # 출력 디렉토리 생성
+            os.makedirs(self.output_dir, exist_ok=True)
+            
+            # 디렉토리 설정 저장
+            self.setting_service.set_directories(self.input_dir, self.output_dir)
             
             # 디렉토리 스캔
             log_info(f"디렉토리 비동기 스캔 시작: {self.input_dir}")
@@ -120,7 +132,7 @@ class Application:
             
             # 파일 파싱
             media_items = self.parser_service.parse_files(files)
-            log_info(f"스캔 완료: {len(media_items)}개 미디어 아이템")
+            log_info(f"파싱 완료: {len(media_items)}개 미디어 아이템")
             
             # 미리보기 모드
             if self.preview_mode:
@@ -160,12 +172,20 @@ class Application:
         
         log_info("===== 현재 설정 =====")
         for key, value in sorted(settings.items()):
-            log_info(f"{key}: {value}")
+            # API 키는 일부만 표시
+            if 'api_key' in key and value:
+                masked_value = value[:4] + "*" * (len(value) - 4) if len(value) > 4 else value
+                log_info(f"{key}: {masked_value}")
+            else:
+                log_info(f"{key}: {value}")
         log_info("====================")
         
     def reset_settings(self) -> None:
         """설정을 기본값으로 초기화합니다"""
         if self.setting_service.reset_to_defaults():
+            # 초기화 후 인스턴스 변수 업데이트
+            self.input_dir = self.setting_service.get_input_directory()
+            self.output_dir = self.setting_service.get_output_directory()
             log_info("설정이 기본값으로 초기화되었습니다")
         else:
             log_error("설정 초기화 중 오류가 발생했습니다")
@@ -195,6 +215,7 @@ def parse_args() -> argparse.Namespace:
     # 설정 관리 인자
     setting_group.add_argument("--show-settings", action="store_true", help="현재 설정 표시 후 종료")
     setting_group.add_argument("--reset-settings", action="store_true", help="설정을 기본값으로 초기화")
+    setting_group.add_argument("--set-api-key", help="TMDB API 키 설정", metavar="API_KEY")
     
     return parser.parse_args()
 
@@ -216,6 +237,12 @@ async def main() -> int:
     # 애플리케이션 인스턴스 생성
     app = Application()
     
+    # API 키 설정
+    if hasattr(args, 'set_api_key') and args.set_api_key:
+        app.setting_service.update_setting("tmdb_api_key", args.set_api_key)
+        log_info("API 키가 저장되었습니다")
+        return 0
+    
     # 특수 커맨드 처리
     if args.show_settings:
         app.show_settings()
@@ -225,11 +252,11 @@ async def main() -> int:
         app.reset_settings()
         return 0
     
-    # 필수 인자 검사
-    if not args.input_dir or not args.output_dir:
+    # 필수 인자 검사 - 설정에서 로드되므로 다음과 같이 수정
+    if (not args.input_dir and not app.input_dir) or (not args.output_dir and not app.output_dir):
         if not (args.show_settings or args.reset_settings):
             parser = argparse.ArgumentParser()
-            parser.error("input_dir과 output_dir 인자가 필요합니다")
+            parser.error("입력 및 출력 디렉토리가 설정되지 않았습니다")
         return 0
     
     # 애플리케이션 설정
