@@ -25,12 +25,18 @@ wheels/
 *.egg
 MANIFEST
 
-#cursor 관련
-.cursorrules    
-.cursor
-.cursorignore
-.cursorignorerules
-.gursor\rules
+# test 관련
+temp/
+test/
+test_input/
+test_output/
+tests/
+# cursor 관련
+cursorrules/
+cursor/
+cursorignore/
+cursorignorerules/
+gursor\rules/
 *.mdc
 
 # PyInstaller
