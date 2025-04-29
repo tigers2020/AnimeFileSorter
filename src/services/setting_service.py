@@ -25,6 +25,8 @@ class SettingService:
         # 폴더 패턴 설정
         "series_folder_pattern": "{series_name}",
         "season_folder_pattern": "Season {season_number}",
+        "episode_pattern": "{series_name} - S{season_number}E{episode_number}",
+        "movie_pattern": "{title} ({year})",
         
         # 폴더 생성 옵션
         "create_series_folders": True,
@@ -34,6 +36,7 @@ class SettingService:
         # 파일 작업 설정
         "operation_type": "COPY",  # "COPY" 또는 "MOVE"
         "move_subtitles": True,
+        "confirm_before_organize": True,
         
         # 스캔 설정
         "video_extensions": ".mp4,.mkv,.avi,.mov,.wmv,.m4v,.flv,.webm",

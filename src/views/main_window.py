@@ -28,6 +28,7 @@ from src.views.screens.dashboard_screen import DashboardScreen
 from src.views.screens.file_browser_screen import FileBrowserScreen
 from src.views.screens.settings_screen import SettingsScreen
 from src.controllers.file_controller import FileController
+from src.services.setting_service import SettingService
 from src.utils.logger import log_info, log_error, log_debug, log_warning
 
 
@@ -37,8 +38,11 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         
+        # Initialize services
+        self.setting_service = SettingService()
+        
         # Initialize controllers
-        self.file_controller = FileController()
+        self.file_controller = FileController(self.setting_service)
         
         # Connect controller signals to status updates
         self.file_controller.scan_started.connect(self.on_scan_started)
@@ -74,7 +78,7 @@ class MainWindow(QMainWindow):
         self.file_browser_screen = FileBrowserScreen(self.file_controller)
         self.tab_widget.addTab(self.file_browser_screen, "파일 관리")
         
-        self.settings_screen = SettingsScreen()
+        self.settings_screen = SettingsScreen(self.setting_service)
         self.tab_widget.addTab(self.settings_screen, "설정")
         
         # Setup status bar

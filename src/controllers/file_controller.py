@@ -75,13 +75,30 @@ class FileController(QObject):
     organize_completed = Signal(list)
     organize_error = Signal(str)
     
-    def __init__(self):
-        """Initialize the file controller."""
+    def __init__(self, setting_service=None):
+        """
+        Initialize the file controller.
+        
+        Args:
+            setting_service: Service for managing settings
+        """
         super().__init__()
-        self.scanner_service = ScannerService()
-        self.organizer_service = OrganizerService()
-        self.input_directory = ""
-        self.output_directory = ""
+        
+        # 설정 서비스 저장
+        self.setting_service = setting_service
+        
+        # 서비스 초기화 (설정 서비스 전달)
+        self.scanner_service = ScannerService(setting_service)
+        self.organizer_service = OrganizerService(setting_service)
+        
+        # 기본 디렉토리 설정
+        if setting_service:
+            self.input_directory = setting_service.get_input_directory()
+            self.output_directory = setting_service.get_output_directory()
+        else:
+            self.input_directory = ""
+            self.output_directory = ""
+            
         self.scanned_files: List[MediaItem] = []
         
         # Thread pool for background operations

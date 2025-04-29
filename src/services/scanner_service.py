@@ -15,8 +15,16 @@ from src.utils.logger import log_info, log_error, log_debug
 class ScannerService:
     """디렉토리를 스캔하여 미디어 파일을 찾는 서비스"""
     
-    def __init__(self):
-        """스캐너 서비스 초기화"""
+    def __init__(self, setting_service=None):
+        """
+        스캐너 서비스 초기화
+        
+        Args:
+            setting_service: 설정 서비스 인스턴스 (선택 사항)
+        """
+        # 설정 서비스 저장
+        self.setting_service = setting_service
+        
         # 기본 비디오 파일 확장자
         self.default_video_extensions = [
             ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v", ".flv", ".webm"
@@ -31,6 +39,38 @@ class ScannerService:
         self.ignore_keywords = [
             "sample", "trailer", "preview", "teaser"
         ]
+        
+        # 설정 서비스에서 확장자 설정 로드
+        if setting_service:
+            # 비디오 파일 확장자 설정 로드
+            video_extensions = setting_service.get_setting("video_extensions", "")
+            if video_extensions:
+                # 쉼표로 구분된 확장자 문자열을 리스트로 변환
+                self.VIDEO_EXTENSIONS = video_extensions.split(",")
+                # 마침표가 없는 확장자에 마침표 추가
+                self.VIDEO_EXTENSIONS = [
+                    ext if ext.startswith('.') else f".{ext}" 
+                    for ext in self.VIDEO_EXTENSIONS
+                ]
+            else:
+                self.VIDEO_EXTENSIONS = self.default_video_extensions
+                
+            # 자막 파일 확장자 설정 로드
+            subtitle_extensions = setting_service.get_setting("subtitle_extensions", "")
+            if subtitle_extensions:
+                # 쉼표로 구분된 확장자 문자열을 리스트로 변환
+                self.SUBTITLE_EXTENSIONS = subtitle_extensions.split(",")
+                # 마침표가 없는 확장자에 마침표 추가
+                self.SUBTITLE_EXTENSIONS = [
+                    ext if ext.startswith('.') else f".{ext}" 
+                    for ext in self.SUBTITLE_EXTENSIONS
+                ]
+            else:
+                self.SUBTITLE_EXTENSIONS = self.subtitle_extensions
+        else:
+            # 설정 서비스가 없는 경우 기본값 사용
+            self.VIDEO_EXTENSIONS = self.default_video_extensions
+            self.SUBTITLE_EXTENSIONS = self.subtitle_extensions
     
     async def scan_directory_async(
         self,
@@ -56,7 +96,7 @@ class ScannerService:
             return []
         
         if extensions is None:
-            extensions = self.default_video_extensions
+            extensions = self.VIDEO_EXTENSIONS
             
         # 소문자로 변환하여 비교 일관성 유지
         extensions = [ext.lower() if not ext.startswith('.') else ext.lower() for ext in extensions]
@@ -199,7 +239,7 @@ class ScannerService:
             미디어 파일 경로 목록
         """
         if extensions is None:
-            extensions = self.default_video_extensions
+            extensions = self.VIDEO_EXTENSIONS
             
         # 소문자로 변환하여 비교 일관성 유지
         extensions = [ext.lower() if not ext.startswith('.') else ext.lower() for ext in extensions]

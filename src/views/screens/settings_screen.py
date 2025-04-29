@@ -25,6 +25,9 @@ from PySide6.QtWidgets import (
     QScrollArea
 )
 
+from src.services.setting_service import SettingService
+from src.utils.logger import log_info, log_error, log_debug
+
 
 class SettingsTab(QScrollArea):
     """Base class for settings tabs with scrollable content."""
@@ -273,52 +276,193 @@ class APISettingsTab(SettingsTab):
 class SettingsScreen(QWidget):
     """Settings screen for configuring application settings."""
     
-    def __init__(self):
+    def __init__(self, setting_service=None):
         super().__init__()
+        self.setting_service = setting_service or SettingService()
+        self.has_unsaved_changes = False
         self.init_ui()
+        self.load_ui_from_settings()
     
     def init_ui(self):
         """Initialize the UI components."""
-        # Main layout
-        layout = QVBoxLayout()
-        self.setLayout(layout)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
         
         # Tab widget
-        self.tab_widget = QTabWidget()
+        self.tabs = QTabWidget()
         
-        # Add tabs
+        # General settings tab
         self.general_tab = GeneralSettingsTab()
-        self.tab_widget.addTab(self.general_tab, "일반")
+        self.tabs.addTab(self.general_tab, "일반")
         
+        # File organization tab
         self.organization_tab = FileOrganizationTab()
-        self.tab_widget.addTab(self.organization_tab, "파일 정리")
+        self.tabs.addTab(self.organization_tab, "파일 정리")
         
+        # API settings tab
         self.api_tab = APISettingsTab()
-        self.tab_widget.addTab(self.api_tab, "API 연동")
+        self.tabs.addTab(self.api_tab, "API 연동")
         
-        layout.addWidget(self.tab_widget)
+        layout.addWidget(self.tabs)
         
         # Buttons
         button_layout = QHBoxLayout()
-        
-        self.save_button = QPushButton("저장")
-        self.save_button.setMinimumSize(100, 30)
-        button_layout.addWidget(self.save_button)
+        button_layout.addStretch()
         
         self.reset_button = QPushButton("초기화")
+        self.reset_button.clicked.connect(self.on_reset_clicked)
         button_layout.addWidget(self.reset_button)
         
-        button_layout.addStretch()
+        self.save_button = QPushButton("저장")
+        self.save_button.clicked.connect(self.on_save_clicked)
+        button_layout.addWidget(self.save_button)
         
         layout.addLayout(button_layout)
         
         # Connect signals
-        self.save_button.clicked.connect(self.on_save_clicked)
-        self.reset_button.clicked.connect(self.on_reset_clicked)
+        self.connect_signals()
+    
+    def connect_signals(self):
+        """Connect widget signals to track changes."""
+        # General tab signals
+        self.general_tab.input_dir.textChanged.connect(self.mark_changes)
+        self.general_tab.output_dir.textChanged.connect(self.mark_changes)
+        self.general_tab.startup_check.stateChanged.connect(self.mark_changes)
+        self.general_tab.auto_scan_check.stateChanged.connect(self.mark_changes)
+        self.general_tab.confirm_check.stateChanged.connect(self.mark_changes)
+        
+        # Organization tab signals
+        self.organization_tab.create_subfolder_check.stateChanged.connect(self.mark_changes)
+        self.organization_tab.season_folder_check.stateChanged.connect(self.mark_changes)
+        self.organization_tab.move_subtitles_check.stateChanged.connect(self.mark_changes)
+        self.organization_tab.series_pattern.textChanged.connect(self.mark_changes)
+        self.organization_tab.season_pattern.textChanged.connect(self.mark_changes)
+        self.organization_tab.episode_pattern.textChanged.connect(self.mark_changes)
+        self.organization_tab.movie_pattern.textChanged.connect(self.mark_changes)
+        
+        # API tab signals
+        self.api_tab.tmdb_enable.stateChanged.connect(self.mark_changes)
+        self.api_tab.tmdb_key.textChanged.connect(self.mark_changes)
+        self.api_tab.anilist_enable.stateChanged.connect(self.mark_changes)
+        self.api_tab.anilist_client_id.textChanged.connect(self.mark_changes)
+    
+    def mark_changes(self):
+        """Mark that there are unsaved changes."""
+        self.has_unsaved_changes = True
+        
+        # 자동 저장 설정이 활성화되어 있으면 즉시 저장
+        if self.setting_service.get_setting("auto_save_settings", True):
+            self.on_save_clicked()
+    
+    def load_ui_from_settings(self):
+        """Load UI elements from current settings."""
+        log_debug("UI 요소를 설정에서 로드합니다")
+        
+        # UI와 설정 키 매핑에 따라 값 로드
+        
+        # General Tab
+        self.general_tab.input_dir.setText(self.setting_service.get_setting("input_directory", ""))
+        self.general_tab.output_dir.setText(self.setting_service.get_setting("output_directory", ""))
+        self.general_tab.startup_check.setChecked(self.setting_service.get_setting("check_updates", True))
+        self.general_tab.auto_scan_check.setChecked(self.setting_service.get_setting("scan_recursive", True))
+        self.general_tab.confirm_check.setChecked(self.setting_service.get_setting("confirm_before_organize", True))
+        
+        # Organization Tab
+        self.organization_tab.create_subfolder_check.setChecked(self.setting_service.get_setting("create_series_folders", True))
+        self.organization_tab.season_folder_check.setChecked(self.setting_service.get_setting("create_season_folders", True))
+        self.organization_tab.move_subtitles_check.setChecked(self.setting_service.get_setting("move_subtitles", True))
+        self.organization_tab.series_pattern.setText(self.setting_service.get_setting("series_folder_pattern", "{series_name}"))
+        self.organization_tab.season_pattern.setText(self.setting_service.get_setting("season_folder_pattern", "Season {season_number}"))
+        
+        # DEFAULT_SETTINGS에 없는 값들은 직접 생성해줘야 할 수 있음
+        self.organization_tab.episode_pattern.setText(self.setting_service.get_setting("episode_pattern", 
+                                                     "{series_name} - S{season_number}E{episode_number}"))
+        self.organization_tab.movie_pattern.setText(self.setting_service.get_setting("movie_pattern", 
+                                                   "{title} ({year})"))
+        
+        # API Tab
+        self.api_tab.tmdb_enable.setChecked(self.setting_service.get_setting("use_external_api", False))
+        self.api_tab.tmdb_key.setText(self.setting_service.get_setting("tmdb_api_key", ""))
+        
+        # 애니리스트 설정은 DEFAULT_SETTINGS에 없을 수 있으므로 안전하게 처리
+        self.api_tab.anilist_client_id.setText(self.setting_service.get_setting("anilist_api_key", ""))
+        
+        self.has_unsaved_changes = False
+        log_info("설정에서 UI 로드 완료")
     
     def on_save_clicked(self):
         """Handle save button click."""
-        QMessageBox.information(self, "설정 저장", "설정이 저장되었습니다.")
+        log_debug("설정 저장을 시도합니다")
+        
+        # 변경된 설정을 딕셔너리로 모음
+        updates = {
+            # General Tab
+            "input_directory": self.general_tab.input_dir.text(),
+            "output_directory": self.general_tab.output_dir.text(),
+            "check_updates": self.general_tab.startup_check.isChecked(),
+            "scan_recursive": self.general_tab.auto_scan_check.isChecked(),
+            "confirm_before_organize": self.general_tab.confirm_check.isChecked(),
+            
+            # Organization Tab
+            "create_series_folders": self.organization_tab.create_subfolder_check.isChecked(),
+            "create_season_folders": self.organization_tab.season_folder_check.isChecked(),
+            "move_subtitles": self.organization_tab.move_subtitles_check.isChecked(),
+            "series_folder_pattern": self.organization_tab.series_pattern.text(),
+            "season_folder_pattern": self.organization_tab.season_pattern.text(),
+            "episode_pattern": self.organization_tab.episode_pattern.text(),
+            "movie_pattern": self.organization_tab.movie_pattern.text(),
+            
+            # API Tab
+            "use_external_api": self.api_tab.tmdb_enable.isChecked(),
+            "tmdb_api_key": self.api_tab.tmdb_key.text(),
+            "anilist_api_key": self.api_tab.anilist_client_id.text()
+        }
+        
+        # 디렉토리 경로 검증
+        errors = self.validate_settings(updates)
+        if errors:
+            error_message = "\n".join(errors)
+            QMessageBox.warning(self, "설정 오류", f"다음 오류를 수정해주세요:\n{error_message}")
+            return
+        
+        # 설정 저장
+        log_info(f"설정 업데이트 시도: {len(updates)}개 항목")
+        success = self.setting_service.update_settings(updates)
+        
+        if success:
+            self.has_unsaved_changes = False
+            log_info("설정 저장 성공")
+        else:
+            log_error("설정 저장 실패")
+            QMessageBox.warning(self, "저장 실패", "설정 저장에 실패했습니다.")
+    
+    def validate_settings(self, updates: dict) -> list:
+        """
+        설정 값을 검증합니다.
+        
+        Args:
+            updates: 검증할 설정 딕셔너리
+            
+        Returns:
+            오류 메시지 리스트 (문제가 없으면 빈 리스트)
+        """
+        errors = []
+        
+        # 예시: 입력 디렉토리가 설정된 경우 존재 여부 확인
+        input_dir = updates.get("input_directory")
+        if input_dir and not Path(input_dir).exists():
+            errors.append(f"입력 디렉토리가 존재하지 않습니다: {input_dir}")
+        
+        # 패턴이 빈 문자열인지 확인
+        if not updates.get("series_folder_pattern"):
+            errors.append("시리즈 폴더 패턴을 지정해야 합니다.")
+        
+        if not updates.get("season_folder_pattern"):
+            errors.append("시즌 폴더 패턴을 지정해야 합니다.")
+        
+        # 다른 검증 로직 추가...
+        
+        return errors
     
     def on_reset_clicked(self):
         """Handle reset button click."""
@@ -331,5 +475,11 @@ class SettingsScreen(QWidget):
         )
         
         if reply == QMessageBox.Yes:
-            # Reset settings to defaults
-            pass 
+            log_info("설정 초기화 시도")
+            if self.setting_service.reset_to_defaults():
+                self.load_ui_from_settings()
+                log_info("설정이 기본값으로 초기화되었습니다")
+                QMessageBox.information(self, "초기화", "기본값으로 초기화되었습니다.")
+            else:
+                log_error("설정 초기화 중 오류가 발생했습니다")
+                QMessageBox.warning(self, "실패", "초기화 중 오류가 발생했습니다.") 
