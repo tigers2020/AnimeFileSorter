@@ -1,7 +1,7 @@
 ---
 description: 
-globs: *.py
-alwaysApply: false
+globs: 
+alwaysApply: true
 ---
 아래는 Python 코딩 시 지켜야 할 주요 룰입니다.  
 

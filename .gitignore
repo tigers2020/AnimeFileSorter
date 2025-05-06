@@ -139,4 +139,17 @@ logs/
 
 # Custom ignored directories
 temp/
-tmp/ 
+tmp/
+
+# Database
+*.db
+
+# IDE settings
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Project specific
+anime_sorter.log
+config.json 
